@@ -18,7 +18,7 @@ import (
 // CreateCorsProxy will create a new proxying http.Handler that takes control of
 // CORS.
 func CreateCorsProxy(target *url.URL, origins []string, allowCredentials bool, transport *http.RoundTripper, debug bool) (http.Handler, error) {
-	proxy, err := CreateAuthProxy(target, "", "", transport, debug)
+	proxy, err := CreateIdTokenProxy(target, "", "", transport, debug)
 	if err != nil {
 		return nil, fmt.Errorf("error creating proxy: %s", err)
 	}
@@ -72,38 +72,41 @@ func originsFn(origins ...string) (func(string) bool, error) {
 	}, nil
 }
 
-// CreateAuthProxy will create a new reverse proxy. If an audience is specified,
-// it will add (and possibly overwrite) Open ID tokens to the proxied requests.
+// CreateIdTokenProxy will create a new reverse proxy. If an audience is
+// specified, it will add (and possibly overwrite) Open ID tokens to the proxied
+// requests.
 //
 // The identity token source will use the Google ADC system to retrieve
 // credentials (https://cloud.google.com/docs/authentication/production). You
 // can override this by specifying a credentials file path. When running on
 // Google infrastructure however, the latter is highly discouraged.
-func CreateAuthProxy(target *url.URL, audience, credentialsFile string, transport *http.RoundTripper, debug bool) (*httputil.ReverseProxy, error) {
+func CreateIdTokenProxy(target *url.URL, audience, credentialsFile string, transport *http.RoundTripper, debug bool) (*httputil.ReverseProxy, error) {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	std := proxy.Director
 	proxy.Director = func(r *http.Request) {
 		std(r)
 		r.Host = target.Host
 	}
+
+	if transport == nil {
+		proxy.Transport = RemoveCorsTripper{Base: http.DefaultTransport}
+	} else {
+		proxy.Transport = RemoveCorsTripper{Base: *transport}
+	}
+	if debug {
+		proxy.Transport = LogTripper{Base: proxy.Transport}
+	}
+
 	if audience != "" {
-		var tr http.RoundTripper
-		if transport == nil {
-			tr = http.DefaultTransport
-		} else {
-			tr = *transport
-		}
-		if debug {
-			tr = LogTripper{Base: tr}
-		}
-		if err := addIdTokenTransport(proxy, audience, credentialsFile, tr); err != nil {
+		if err := addIdTokenTransport(proxy, audience, credentialsFile); err != nil {
 			return nil, fmt.Errorf("error creating id token source transport: %s", err)
 		}
 	}
+
 	return proxy, nil
 }
 
-func addIdTokenTransport(proxy *httputil.ReverseProxy, aud, gacFile string, transport http.RoundTripper) error {
+func addIdTokenTransport(proxy *httputil.ReverseProxy, aud, gacFile string) error {
 	ctx := context.Background()
 
 	var opts []idtoken.ClientOption
@@ -116,9 +119,7 @@ func addIdTokenTransport(proxy *httputil.ReverseProxy, aud, gacFile string, tran
 		return err
 	}
 
-	transport = RemoveCorsTripper{&oauth2.Transport{Source: ts, Base: transport}}
-
-	proxy.Transport = transport
+	proxy.Transport = &oauth2.Transport{Source: ts, Base: proxy.Transport}
 	return nil
 }
 
