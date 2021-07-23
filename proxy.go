@@ -17,6 +17,9 @@ import (
 
 // CreateCorsProxy will create a new proxying http.Handler that takes control of
 // CORS.
+//
+// For developer convenience, calls from origin host 'localhost:?' are always
+// accepted.
 func CreateCorsProxy(target *url.URL, origins []string, allowCredentials bool, transport *http.RoundTripper, debug bool) (http.Handler, error) {
 	proxy, err := CreateIdTokenProxy(target, "", "", transport, debug)
 	if err != nil {
@@ -25,7 +28,11 @@ func CreateCorsProxy(target *url.URL, origins []string, allowCredentials bool, t
 	return CreateHandler(proxy, origins, allowCredentials)
 }
 
-// CreateHandler creates a CORS handling http.Handler from a reverse proxy.
+// CreateHandler creates a CORS handling http.Handler from a reverse proxy. If
+// origins is left empty, it will use the special value '*'.
+//
+// For developer convenience, calls from origin host 'localhost:?' are always
+// accepted.
 func CreateHandler(proxy *httputil.ReverseProxy, origins []string, allow bool) (http.Handler, error) {
 	var h http.Handler = proxy
 	// be rather permissive
