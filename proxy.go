@@ -25,7 +25,7 @@ func CreateCorsProxy(target *url.URL, origins []string, allowCredentials bool, t
 	if err != nil {
 		return nil, fmt.Errorf("error creating proxy: %s", err)
 	}
-	return CreateHandler(proxy, origins, allowCredentials)
+	return CreateHandler(proxy, origins, allowCredentials, debug)
 }
 
 // CreateHandler creates a CORS handling http.Handler from a reverse proxy. If
@@ -33,10 +33,10 @@ func CreateCorsProxy(target *url.URL, origins []string, allowCredentials bool, t
 //
 // For developer convenience, calls from origin host 'localhost:?' are always
 // accepted.
-func CreateHandler(proxy *httputil.ReverseProxy, origins []string, allow bool) (http.Handler, error) {
+func CreateHandler(proxy *httputil.ReverseProxy, origins []string, allow, debug bool) (http.Handler, error) {
 	var h http.Handler = proxy
 	// be rather permissive
-	fn, err := originsFn(origins...)
+	fn, err := originsFn(debug, origins...)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func CreateHandler(proxy *httputil.ReverseProxy, origins []string, allow bool) (
 	return h, nil
 }
 
-func originsFn(origins ...string) (func(string) bool, error) {
+func originsFn(debug bool, origins ...string) (func(string) bool, error) {
 	if len(origins) == 0 || origins[0] == "*" {
 		return func(o string) bool {
 			return true
@@ -70,12 +70,20 @@ func originsFn(origins ...string) (func(string) bool, error) {
 	return func(o string) bool {
 		u, err := url.Parse(o)
 		if err != nil {
+			logjson.Info("CORS: invalid origin: %s", o)
 			return false
 		}
 		if strings.HasPrefix(u.Host, "localhost:") {
+			if debug {
+				logjson.Info("CORS: request from localhost, accept")
+			}
 			return true
 		}
-		return hosts[u.Host]
+		ok := hosts[u.Host]
+		if debug {
+			logjson.Info("CORS: request from %s, ok=%v", u.Host, ok)
+		}
+		return ok
 	}, nil
 }
 
